@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Gorge Bingo</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      background: #FFE5E5;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      margin: 0;
+    }
+
+    .container {
+      background: #ffbebe;
+      padding: 6.25px; /* 25% larger: 5px → 6.25px */
+      border-radius: 40px; /* 25% larger: 32px → 40px */
+      box-shadow: 0 15px 44px rgba(0,0,0,0.12); /* 25% larger shadow */
+      width: 1125px; /* 25% larger: 900px → 1125px */
+      max-width: 95vw;
+    }
+
+    h1 {
+      text-align: center;
+      margin-bottom: 0px;
+      font-size: 55px; /* 25% larger: 44px → 55px */
+      color: #411111;
+    }
+
+    .board-wrapper {
+      position: relative;
+      width: 875px; /* 25% larger: 700px → 875px */
+      height: 875px; /* 25% larger: 700px → 875px */
+      margin: 0 auto;
+      max-width: 85vw;
+      max-height: 85vw;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .board {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      grid-template-rows: repeat(5, 1fr);
+      gap: 12.5px; /* 25% larger: 10px → 12.5px */
+      width: 750px; /* 25% larger: 600px → 750px */
+      height: 750px; /* 25% larger: 600px → 750px */
+      box-sizing: border-box;
+      position: relative;
+    }
+
+    .cell {
+      border: 1px solid #E09999;
+      border-radius: 15px; /* 25% larger: 12px → 15px */
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 10px; /* 25% larger: 8px → 10px */
+      background: #ffe0e0;
+      color: #000000;
+      cursor: pointer;
+      user-select: none;
+      text-align: center;
+      box-sizing: border-box;
+      overflow: hidden;
+      font-weight: 600;
+      line-height: 1.2;
+      word-break: keep-all;
+      overflow-wrap: break-word;
+      hyphens: auto;
+      transition: background-color 0.2s ease;
+      font-size: 20px;
+    }
+
+    .cell.marked {
+      background: #a13939;
+      color: #FFFFFF;
+    }
+
+    .cell.free {
+      background: #895d5d;
+      font-weight: 700;
+      cursor: default;
+      color: #FFFFFF;
+    }
+
+    .win-line {
+      position: absolute;
+      background: rgba(255, 255, 255, 0.8);
+      border-radius: 9999px;
+      pointer-events: none;
+      transform-origin: center center;
+      z-index: 10;
+      box-shadow: 0 0 10px rgba(0, 0, 0, 0.3); /* 25% larger shadow */
+    }
+
+    #status {
+      margin-top: 0px;
+      text-align: center;
+      font-size: 42.5px; /* 25% larger: 34px → 42.5px */
+      font-weight: 700;
+      color: #260a0a;
+      margin-bottom: 52.5px; /* 25% larger: 42px → 52.5px */
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <h1>Gorge Bingo</h1>
+
+    <div class="board-wrapper" id="wrapper">
+      <div id="board" class="board"></div>
+      <div id="line"></div>
+    </div>
+
+    <div id="status"></div>
+  </div>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const WORDS = [
+        "@apex","india mentioned","Japanese study session","why are there 10 in call during working hours",
+        "Cody posts a friendslop","Todd talks about patients","Todd derogatory zzz remarks","morning wagies",
+        "i love my wife","Ying talks about some Chinese shit tech","Ying refunds an amazon purchase","George post",
+        "George complains about work","George wants to die","George complains seattle","wyd",
+        "Cheng talks about patients","it's 1 am and Cheng just got home from work","Cheng posts lunch","Cheng posts steak",
+        "Kae says he is working late","Kae posts halal","Eric rallies for csgo",
+        "Bob initiates ethnoguessr and carson gets called a racist","Edison on REPO",
+        "Edison in call alone for 2+ hours","Someone shits on Zhen","Someone calls Carson racist"
+      ];
+
+      const board = document.getElementById('board');
+      const status = document.getElementById('status');
+      const line = document.getElementById('line');
+      const wrapper = document.getElementById('wrapper');
+      const STORAGE_KEY = 'daily-bingo-progress';
+      const GRID_SIZE = 750; // 25% larger: 600 → 750
+      const CELL_COUNT = 5;
+      const GAP = 12.5; // 25% larger: 10 → 12.5
+
+      function getDailySeed() {
+        const d = new Date();
+        return d.getFullYear()*10000 + (d.getMonth()+1)*100 + d.getDate();
+      }
+
+      function mulberry32(a) {
+        return function () {
+          let t = a += 0x6D2B79F5;
+          t = Math.imul(t ^ t >>> 15, t | 1);
+          t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+          return ((t ^ t >>> 14) >>> 0) / 4294967296;
+        };
+      }
+
+      function shuffle(arr, seed) {
+        const a = [...arr];
+        const r = mulberry32(seed);
+        for (let i = a.length - 1; i > 0; i--) {
+          const j = Math.floor(r() * (i + 1));
+          [a[i], a[j]] = [a[j], a[i]];
+        }
+        return a;
+      }
+
+      function load() {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) return Array(25).fill(false);
+        const d = JSON.parse(raw);
+        if (d.date !== getDailySeed()) return Array(25).fill(false);
+        return d.marked;
+      }
+
+      function save(marked) {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({ date: getDailySeed(), marked }));
+      }
+
+      const WINS = [
+        { cells:[0,1,2,3,4], type:'row', i:0 },{ cells:[5,6,7,8,9], type:'row', i:1 },
+        { cells:[10,11,12,13,14], type:'row', i:2 },{ cells:[15,16,17,18,19], type:'row', i:3 },
+        { cells:[20,21,22,23,24], type:'row', i:4 },
+        { cells:[0,5,10,15,20], type:'col', i:0 },{ cells:[1,6,11,16,21], type:'col', i:1 },
+        { cells:[2,7,12,17,22], type:'col', i:2 },{ cells:[3,8,13,18,23], type:'col', i:3 },
+        { cells:[4,9,14,19,24], type:'col', i:4 },
+        { cells:[0,6,12,18,24], type:'diag', i:0 },{ cells:[4,8,12,16,20], type:'diag', i:1 }
+      ];
+
+      function drawLine(win) {
+        const wrapperWidth = wrapper.clientWidth;
+        const wrapperHeight = wrapper.clientHeight;
+        const gridLeft = (wrapperWidth - GRID_SIZE) / 2;
+        const gridTop = (wrapperHeight - GRID_SIZE) / 2;
+        
+        // Calculate cell size (accounting for gaps)
+        const cellSize = (GRID_SIZE - GAP * 4) / CELL_COUNT;
+        
+        line.className = 'win-line';
+        line.style = '';
+
+        if (win.type === 'row') {
+          line.style.width = GRID_SIZE + 'px';
+          line.style.height = '12.5px'; // 25% larger: 10px → 12.5px
+          line.style.left = gridLeft + 'px';
+          line.style.top = (gridTop + win.i * (cellSize + GAP) + cellSize / 2 - 6.25) + 'px'; // Adjusted for 12.5px height
+        }
+
+        if (win.type === 'col') {
+          line.style.height = GRID_SIZE + 'px';
+          line.style.width = '12.5px'; // 25% larger: 10px → 12.5px
+          line.style.top = gridTop + 'px';
+          line.style.left = (gridLeft + win.i * (cellSize + GAP) + cellSize / 2 - 6.25) + 'px'; // Adjusted for 12.5px width
+        }
+
+        if (win.type === 'diag') {
+          const diagLength = Math.sqrt(GRID_SIZE * GRID_SIZE + GRID_SIZE * GRID_SIZE);
+          line.style.width = diagLength + 'px';
+          line.style.height = '12.5px'; // 25% larger: 10px → 12.5px
+          line.style.top = (wrapperHeight / 2 - 6.25) + 'px'; // Adjusted for 12.5px height
+          line.style.left = ((wrapperWidth - diagLength) / 2) + 'px';
+          line.style.transformOrigin = 'center center';
+          line.style.transform = win.i === 0 ? 'rotate(45deg)' : 'rotate(-45deg)';
+        }
+      }
+
+      function formatTextWithLineBreaks(text) {
+        const words = text.split(' ');
+        
+        // For single word, just return it
+        if (words.length === 1) {
+          return text;
+        }
+        
+        // For two words, put each on its own line
+        if (words.length === 2) {
+          return words[0] + '<br>' + words[1];
+        }
+        
+        // For three words, each on its own line
+        if (words.length === 3) {
+          return words[0] + '<br>' + words[1] + '<br>' + words[2];
+        }
+        
+        // For four words, 2 lines with 2 words each
+        if (words.length === 4) {
+          return words[0] + ' ' + words[1] + '<br>' + words[2] + ' ' + words[3];
+        }
+        
+        // For five or more words, try for 2-3 words per line
+        const lines = [];
+        let i = 0;
+        while (i < words.length) {
+          // Try to take 3 words, but if only 2 left, take 2
+          const take = (words.length - i >= 3) ? 3 : (words.length - i);
+          lines.push(words.slice(i, i + take).join(' '));
+          i += take;
+        }
+        
+        return lines.join('<br>');
+      }
+
+      function getFontSizeForText(text) {
+        const words = text.split(' ');
+        const wordCount = words.length;
+        const charCount = text.length;
+        
+        // SIMPLE RULES - NO COMPLEX FITTING LOGIC
+        return 20; // Small for very long texts
+      }
+
+      function adjustCellText(cell) {
+        const originalText = cell.textContent;
+        const formattedText = formatTextWithLineBreaks(originalText);
+        const fontSize = 20;
+        
+        cell.innerHTML = formattedText;
+        cell.style.fontSize = fontSize + 'px';
+        
+        // Debug log
+        console.log(`"${originalText}" - ${wordCount} words - ${fontSize}px`);
+      }
+
+      function check() {
+        const cells = [...board.children];
+        for (const win of WINS) {
+          if (win.cells.every(i => cells[i].classList.contains('marked') || cells[i].classList.contains('free'))) {
+            drawLine(win);
+            return true;
+          }
+        }
+        return false;
+      }
+
+      function build() {
+        board.innerHTML = '';
+        status.textContent = '';
+        line.style = '';
+
+        const words = shuffle(WORDS, getDailySeed()).slice(0, 25);
+        const saved = load();
+
+        words.forEach((w, i) => {
+          const c = document.createElement('div');
+          c.className = 'cell';
+          c.textContent = w;
+
+          if (i === 12) {
+            c.textContent = 'Zhen is in call with shawty';
+            c.classList.add('free', 'marked');
+            saved[i] = true;
+          } else {
+            if (saved[i]) c.classList.add('marked');
+          }
+
+          c.addEventListener('click', () => {
+            if (c.classList.contains('free')) return;
+            c.classList.toggle('marked');
+            const marks = [...board.children].map(x => x.classList.contains('marked'));
+            save(marks);
+            if (check()) status.textContent = '🎉 BINGO! 🎉';
+          });
+
+          board.appendChild(c);
+        });
+
+        // Format and size all cells
+
+        
+
+        save(saved);
+        if (check()) status.textContent = '🎉 BINGO! 🎉';
+      }
+
+      build();
+    });
+  </script>
+</body>
+</html>
